@@ -1,67 +1,94 @@
-import requests
-from bs4 import BeautifulSoup
+"""
+scraper.py
+Script para realizar web scraping no site https://quotes.toscrape.com/
+Coleta: citação (quote), autor e tags.
+Salva os dados em um arquivo JSON 'quotes.json' no mesmo diretório do script.
+"""
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 import json
-import time
-import random
+import os
+
 
 def scrape_quotes():
+    """
+    Função principal para extrair citações, autores e tags do site quotes.toscrape.com.
+    Retorna:
+        list: Lista de dicionários com os dados coletados.
+    """
     base_url = "https://quotes.toscrape.com"
     quotes_data = []
-    page_num = 1
 
-    # Definir um User-Agent para simular um navegador
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    # Configurações do navegador (modo headless = sem abrir janela gráfica)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Executar sem abrir janela
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/91.0.4472.124 Safari/537.36"
+    )
+
+    # Inicializa o driver do Chrome
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.get(base_url)
 
     while True:
-        url = f"{base_url}/page/{page_num}/"
-        
         try:
-            response = requests.get(url, headers=headers, timeout=10) # Adicionado timeout
-            response.raise_for_status() # Levanta um erro para códigos de status HTTP ruins (4xx ou 5xx)
-        except requests.exceptions.RequestException as e:
-            print(f"Erro ao acessar a página {url}: {e}")
-            break # Sai do loop em caso de erro de requisição
+            # Aguarda a presença de todos os elementos de citações na página
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "quote"))
+            )
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+            # Localiza todos os blocos de citação
+            quotes_elements = driver.find_elements(By.CLASS_NAME, "quote")
 
-        quotes = soup.find_all('div', class_='quote')
-        if not quotes:
-            print("Nenhuma citação encontrada ou fim das páginas.")
-            break
-
-        for quote in quotes:
-            try:
-                text = quote.find('span', class_='text').text
-                author = quote.find('small', class_='author').text
-                tags_elements = quote.find('div', class_='tags').find_all('a', class_='tag')
+            # Extrai dados de cada citação
+            for q in quotes_elements:
+                text = q.find_element(By.CLASS_NAME, "text").text
+                author = q.find_element(By.CLASS_NAME, "author").text
+                tags_elements = q.find_elements(By.CSS_SELECTOR, ".tags .tag")
                 tags = [tag.text for tag in tags_elements]
-                
-                quotes_data.append({"quote": text, "author": author, "tags": tags})
-            except AttributeError as e:
-                print(f"Erro ao extrair dados de uma citação: {e}. Pulando esta citação.")
-                continue # Continua para a próxima citação se houver erro na extração
-        
-        next_button = soup.find('li', class_='next')
-        if not next_button:
-            print("Botão 'Próximo' não encontrado. Fim do scraping.")
-            break
-        
-        page_num += 1
-        
-        # Adicionar atraso aleatório para evitar bloqueio
-        sleep_time = random.uniform(1, 3) # Atraso entre 1 e 3 segundos
-        print(f"Aguardando {sleep_time:.2f} segundos antes da próxima requisição...")
-        time.sleep(sleep_time)
 
+                quotes_data.append({
+                    "quote": text,
+                    "author": author,
+                    "tags": tags
+                })
+
+            # Tenta localizar e clicar no botão "Next" (próxima página)
+            try:
+                next_button = driver.find_element(By.CSS_SELECTOR, ".next a")
+                next_button.click()
+            except:
+                print("Fim das páginas. Scraping concluído.")
+                break
+
+        except Exception as e:
+            print(f"Erro ao processar página: {e}")
+            break
+
+    driver.quit()
     return quotes_data
 
+
 if __name__ == "__main__":
+    # Executa o scraper
     scraped_data = scrape_quotes()
+
+    # Define caminho absoluto do arquivo JSON no mesmo diretório do script
+    script_dir = os.path.dirname(os.path.abspath(__file__))  # Diretório atual do script
+    output_path = os.path.join(script_dir, "quotes.json")
+
+    # Salva o resultado em quotes.json
     if scraped_data:
-        with open('quotes.json', 'w', encoding='utf-8') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(scraped_data, f, ensure_ascii=False, indent=4)
-        print("Dados salvos em quotes.json")
+        print(f"Dados salvos em {output_path}")
     else:
         print("Nenhum dado foi coletado.")
